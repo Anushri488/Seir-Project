@@ -1,77 +1,94 @@
 import sys
 import requests
 from bs4 import BeautifulSoup
-import re
 
-def get_word_frequency(text):
-    words = re.findall(r"[a-z0-9]+", text.lower())
-    freq = {}
+def count_words(text):
+    text = text.lower()
+    word_list = []
+    temp = ""
+    for c in text:
+        if c.isalnum():
+            temp += c
+        else:
+            if temp != "":
+                word_list.append(temp)
+                temp = ""
+    if temp != "":
+        word_list.append(temp)
 
-    for word in words:
-        freq[word] = freq.get(word, 0) + 1
+    word_count = {}
+    for w in word_list:
+        if w not in word_count:
+            word_count[w] = 1
+        else:
+            word_count[w] += 1
+    return word_count
+    
 
-    return freq
-
-
-def polynomial_hash(word):
-    p = 53
-    m = 2**64
-    hash_value = 0
-    power = 1
+def make_hash(word):
+    base = 31
+    limit = 2**64
+    value = 0
     for ch in word:
-        hash_value = (hash_value + ord(ch) * power) % m
-        power = (power * p) % m
-    return hash_value
+            value = (value * base + ord(ch)) % limit
+    return value
+    
 
-
-
-def comp_simhash(freq):
-    V = [0] * 64
-    for word, count in freq.items():
-        h = polynomial_hash(word)
-
-        for i in range(64):
-            if (h >> i) & 1:
-                V[i] += count
+def build_simhash(word_count):
+    bit_score = [0] * 64
+    for w in word_count:
+        h = make_hash(w)
+        freq = word_count[w]
+        pos = 0
+        while pos < 64:
+            if (h >> pos) & 1 == 1:
+                bit_score[pos] += freq
             else:
-                V[i] -= count
-    simhash = 0
-    for i in range(64):
-        if V[i] > 0:
-            simhash |= (1 << i)
-    return simhash
+                bit_score[pos] -= freq
+            pos += 1
+    final_hash = 0
+    index = 0
+    while index < 64:
+        if bit_score[index] > 0:
+            final_hash = final_hash | (1 << index)
+        index += 1
+
+    return final_hash
 
 
-def compare_simhash(hash1, hash2):
-    xor = hash1 ^ hash2
-    different_bits = bin(xor).count("1")
-    return 64 - different_bits
+def similarity(hash_a, hash_b):
+    diff = hash_a ^ hash_b
+    mismatch = 0
+    while diff > 0:
+        if diff % 2 == 1:
+            mismatch += 1
+        diff = diff // 2
+
+    return 64 - mismatch
 
 
+if len(sys.argv) != 3:
+    print("Please enter two URLs")
+    sys.exit(1)
 
-if len(sys.argv) < 3:
-    print("Enter the two Urls.")
-    sys.exit()
+u1 = sys.argv[1]
+u2 = sys.argv[2]
 
-url1 = sys.argv[1]
-url2 = sys.argv[2]
+page1 = requests.get(u1)
+page2 = requests.get(u2)
 
-response1 = requests.get(url1)
-soup1 = BeautifulSoup(response1.text, "html.parser")
-body1 = soup1.body.get_text() if soup1.body else ""
+soup1 = BeautifulSoup(page1.text, "html.parser")
+soup2 = BeautifulSoup(page2.text, "html.parser")
 
-response2 = requests.get(url2)
-soup2 = BeautifulSoup(response2.text, "html.parser")
-body2 = soup2.body.get_text() if soup2.body else ""
+text1 = soup1.body.get_text(" ") if soup1.body else ""
+text2 = soup2.body.get_text(" ") if soup2.body else ""
 
-freq1 = get_word_frequency(body1)
-freq2 = get_word_frequency(body2)
+freq_a = count_words(text1)
+freq_b = count_words(text2)
 
+hash_a = build_simhash(freq_a)
+hash_b = build_simhash(freq_b)
 
-hash1 = comp_simhash(freq1)
-hash2 = comp_simhash(freq2)
+result = similarity(hash_a, hash_b)
 
-
-common_bits = compare_simhash(hash1, hash2)
-
-print("Common bits:", common_bits)
+print("Number of matching bits:", result)
